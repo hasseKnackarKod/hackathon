@@ -1,6 +1,5 @@
 # LINC API
 import hackathon_linc as lh
-lh.init('92438482-5598-4e17-8b34-abe17aa8f598')
 
 # For data handling
 import pandas as pd
@@ -11,6 +10,7 @@ from datetime import timedelta
 from threading import Thread, Lock
 import time
 df_lock = Lock()
+from multiprocessing import freeze_support
 
 # For shared data
 import shared
@@ -118,6 +118,8 @@ def append_new_data(df: pd.DataFrame, df_daily: pd.DataFrame, days_back=5, ticke
 
 
 def main():
+    lh.init('92438482-5598-4e17-8b34-abe17aa8f598')
+
     # Strategy allocations
     starting_allocs = [0.25, 0.5, 0.2, 0.05]
     starting_balance = lh.get_balance()
@@ -129,15 +131,17 @@ def main():
     update_thread = Thread(target=update_df, daemon=True)
     stats_thread = Thread(target=print_stats, args=(starting_balance, ), daemon=True)
 
-    diverundmom = LiveTradingModel(starting_capital=starting_balance * starting_allocs[1]).run()
+    # *Start Live Trading Model in a Thread*
+    # diverundmom = LiveTradingModel(starting_balance * starting_allocs[1])  # Allocate 50% of funds
+    # diverundmom_thread = Thread(target=diverundmom.run, daemon=True)  # Daemon threa
 
     markowitz_thread = Thread(target=markowitz, args=(starting_balance * starting_allocs[0], ), daemon=True)
-    diverundmom_thread = Thread(target= lambda: diverundmom.run())
 
     update_thread.start()
     stats_thread.start()
 
     markowitz_thread.start()
+    # diverundmom_thread.start()
 
     try: 
         # Keep main thread alive
@@ -178,25 +182,31 @@ def print_stats(starting_balance: float):
 
     df = shared.shared_data['df']  # Safely get latest df
 
-    print(f"Portfolio: {current_portfolio}")
     stock_portfolio_value = 0
    
     # Get the latest price for each stock
-    df_last_prices = df.sort_values(by='gmtTime').groupby('symbol').last().reset_index()[['symbol', 'price']]
+    df_last_prices = df.sort_values(by='gmtTime').groupby('symbol').last()['price']
 
     # Loop through and save stock specific data
     for symbol, amount in current_portfolio.items():
-        last_price = df_last_prices[df_last_prices['symbol'] == symbol]['price'].values[0]
+        last_price = df_last_prices[symbol]
         # print(f"-----{symbol}-----\nAmount: {amount}, Price: {last_price:.2f}, Value: {amount * last_price:.2f}")
         stock_portfolio_value += amount * last_price
 
+    print("-----STATS------")
+    print(f"Portfolio: {current_portfolio}")
     print(f"Current balance: {current_balance:.2f}")
     print(f"Stock portfolio value: {stock_portfolio_value:.2f}", )
     print(f"Total value: {stock_portfolio_value + current_balance:.2f}")
-    print(f"Percentage change since start: {100* (stock_portfolio_value + current_balance - starting_balance) / starting_balance:.6}%")
+    print(f"Percentage change since start: {100* (stock_portfolio_value + current_balance - starting_balance) / starting_balance:.2}%")
 
     time.sleep(60) # Control update frequency
 
 
-if __name__=="__main__":
-    main() 
+if __name__ == "__main__":
+    freeze_support()  # Required for Windows multiprocessing
+
+    # Now initialize shared data inside main
+    shared.shared_data = shared.get_shared_data()  
+
+    main()

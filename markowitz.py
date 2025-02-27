@@ -30,6 +30,8 @@ def markowitz(starting_capital: float):
     current_capital = starting_capital
     current_portfolio_value = 0
     starting_date = df_daily['date'].unique().max()
+
+    print(f"Markowitz got starting capital: ${starting_capital:,.2f}")
     
     while True:
         latest_prices = df_daily.sort_values(by='date').groupby('symbol').last()['closePrice']
@@ -42,7 +44,7 @@ def markowitz(starting_capital: float):
                 lh.sell(ticker=symbol, amount=amount)
                 total_sell += amount * latest_prices[symbol]
 
-        print(f"Markowitz sold for a value off {total_sell:.2f} on {latest_date}.")
+        print(f"Markowitz sold for a value off {total_sell:,.2f} on {latest_date}.")
         current_capital += total_sell
         current_portfolio_value -= total_sell
 
@@ -88,24 +90,24 @@ def markowitz(starting_capital: float):
         # Extract optimal weights
         optimal_weights = result.x
 
-        # Caclulate number of stocks to buy (rounded down)
-        stocks_amount = current_capital * optimal_weights / sum(optimal_weights)
-        stocks_amount = [int(amount) for amount in stocks_amount]
+        # Caclulate price budget of stocks (rounded down)
+        stocks_price_budget = current_capital * optimal_weights 
 
-        for symbol, amount in zip(list(df_returns.columns), stocks_amount):
+        for symbol, price_budget in zip(list(df_returns.columns), stocks_price_budget):
             total_buy = 0
+            amount = int(price_budget / latest_prices[symbol])
             if amount > 0:
                 current_position[symbol] = amount
                 lh.buy(ticker=symbol, amount=amount)
                 total_buy += amount * latest_prices[symbol]
 
-        print(f"Markowitz bought for a value off {total_buy:.2f} on {latest_date}.")
+        print(f"Markowitz bought for a value off {total_buy:,.2f} on {latest_date}.")
         current_capital -= total_buy
         current_portfolio_value += total_buy
 
         # Keep track of portfolio and current balance. 
-        print(f"Current Markowitz liquid capital: ${current_capital:.2f}")
-        print(f"Current Markowitz portfolio value: ${current_portfolio_value}")
+        print(f"Current Markowitz liquid capital: ${current_capital:,.2f}")
+        print(f"Current Markowitz portfolio value: ${current_portfolio_value:,.2f}")
         print(f"Markowitz return since {starting_date} is {(current_capital + current_portfolio_value - starting_capital) / starting_capital:.2f}%") 
 
         time.sleep(30*8) # Jajemän gubbs, såhär väntar jag på att 30 dagar passerat. Peak performance!

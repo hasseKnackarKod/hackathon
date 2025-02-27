@@ -173,9 +173,3 @@ class LiveTradingModel:
             self.update_data()
             self.trade_logic()
             time.sleep(1)  # Kanske inte ens behövs?
-
-
-# Initialize and run the trading model
-starting_capital = 100000  # Example starting capital
-model = LiveTradingModel(starting_capital)
-model.run()
