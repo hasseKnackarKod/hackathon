@@ -92,7 +92,7 @@ class LiveTradingModel:
                 prev_price = prev_daily_data['AS TILL'] 
                 prev_MA63 = prev_daily_data['MA63']
                 prev_MA252 = prev_daily_data['MA252']
-                prev_STD63 = prev_daily_data[ ## ÄNDRA EFTER RSI PERIOD =========================================='STD63']
+                prev_STD63 = prev_daily_data['STD63'] ## ÄNDRA EFTER RSI PERIOD ==========================================
 
                 # Check if stock is in a cool-down period
                 last_trade = self.cant_buy_timer.get(symbol, 0)
@@ -121,7 +121,7 @@ class LiveTradingModel:
                     stop_loss_price = entry_price * (1 - self.std_threshold * prev_STD63 / prev_price)
 
                     if current_price < stop_loss_price:
-                        lh.sell(ticker=symbol, amount=q                                 ### MÅSTE eveneutellt se ifall den vill gå igenomuantity)
+                        lh.sell(ticker=symbol, amount=quantity)                               ### MÅSTE eveneutellt se ifall den vill gå igenomu
                         self.cash_capital += quantity * current_price
                         print(f"Stop-loss: Sold {symbol} at {current_price:.2f}")
 
@@ -130,7 +130,7 @@ class LiveTradingModel:
 
                     # Profit-taking sell
                     elif current_time - self.last_trade_time[symbol] > self.holding_period:
-                        lh.sell(ticker=symbol, amount=q                             ### MÅSTE eveneutellt se ifall den vill gå igenomuantity)
+                        lh.sell(ticker=symbol, amount=quantity)                        ### MÅSTE eveneutellt se ifall den vill gå igenom
                         self.cash_capital += quantity * current_price
                         print(f"Profit-taking: Sold {symbol} at {current_price:.2f}")
 
