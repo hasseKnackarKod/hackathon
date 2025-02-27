@@ -8,8 +8,16 @@ import numpy as np
 from datetime import timedelta
 
 # For multi-threading
-from threading import Thread
+from threading import Thread, Lock
 import time
+from queue import Queue
+data_queue = Queue()
+df_lock = Lock()
+
+# For propagating data
+from multiprocessing import Manager
+manager = Manager()
+shared_data = manager.dict()
 
 # Miscellaneous
 import sys
@@ -48,7 +56,7 @@ def initialize_dataframes():
     # Sort values
     DF_DAILY = DF_DAILY.sort_values(by=['symbol', 'date'])
 
-def append_new_data(DF: pd.DataFrame, DF_DAILY: pd.DataFrame(), days_back=5, ticker=None):
+def append_new_data(DF: pd.DataFrame, DF_DAILY: pd.DataFrame, days_back=5, ticker=None):
     '''Loads historical data for all tickers some days back. Increase days_back if the API is very slow with updates.'''
 
     # Fetch new data from API
@@ -99,7 +107,6 @@ def append_new_data(DF: pd.DataFrame, DF_DAILY: pd.DataFrame(), days_back=5, tic
 
 
 def main():
-
     # Attributes
     global DF, DF_DAILY
 
@@ -110,42 +117,51 @@ def main():
     # Initialize data
     initialize_dataframes()
 
-    # Infinite loop
-    while True:
+    # Start background threads
+    update_thread = Thread(target=lambda: update_df, daemon=True)
+    stats_thread = Thread(target=lambda: print_stats(starting_balance))
 
-        # Create threads
-        try:
-            append_data_thread = Thread(target=lambda: update_df())
-            append_data_thread.start()
+    update_thread.start()
+    stats_thread.start()
 
-            print_stats_thread = Thread(target=lambda: print_stats(starting_balance))
-            print_stats_thread.start()
+    try: 
+        # Keep main thread alive
+        while True:
+            time.sleep(10)
 
-            # Add one thread per strategy, with the starting balance as argument and handled by the strategy
-            # thread1 = Thread(target=function, args=(starting_balance * starting_allocs[0]))
+    except KeyboardInterrupt:
+        print("\nShutdown signal received. Selling all stocks and turning off...")
 
-        except KeyboardInterrupt:
-            print("\nShutdown signal received. Selling all stocks and turning off...")
+        current_portfolio = lh.get_portfolio()
 
-            current_portfolio = lh.get_portfolio()
+            # Loop through portfolio and sell evertyhing
+        for symbol, amount in current_portfolio.items():
+            if amount > 0:
+                lh.sell(symbol, amount)
+        
+        print("Sells completed!")
+        print(f"Final portfolio: {lh.get_portfolio()}")
 
-             # Loop through portfolio and sell evertyhing
-            for symbol, amount in current_portfolio.items():
-                if amount > 0:
-                    lh.sell(symbol, amount)
-            
-            print("Sells completed!")
-            print(f"Final portfolio: {lh.get_portfolio()}")
-
-            sys.exit()
+        sys.exit()
 
 
+# def update_df():
+#     """Thread-safe function to update DF in the main loop."""
+#     global DF, DF_DAILY  # Ensure we're modifying the correct DF
+#     DF, DF_DAILY = append_new_data(DF, DF_DAILY, days_back=3, ticker=None)
+#     time.sleep(1)
 
 def update_df():
     """Thread-safe function to update DF in the main loop."""
-    global DF, DF_DAILY  # Ensure we're modifying the correct DF
-    DF, DF_DAILY = append_new_data(DF, DF_DAILY, days_back=3, ticker=None)
-    time.sleep(1)
+    global DF, DF_DAILY, data_queue, df_lock, shared_data
+    while True:
+        new_data = data_queue.get()  # Get new data from queue
+        with df_lock:  # Ensure thread safety
+            DF, DF_DAILY = append_new_data(DF, DF_DAILY, days_back=3, ticker=None)
+            shared_data['DF'] = DF.copy()
+            shared_data['DF_DAILY'] = DF_DAILY.copy()
+
+        time.sleep(1)  # Control update frequency
 
 
 def print_stats(starting_balance: float):
@@ -172,7 +188,7 @@ def print_stats(starting_balance: float):
 
     print(f"Percentage change since start: {100* (stock_portfolio_value + current_balance - starting_balance) / starting_balance:.6}%")
 
-    time.sleep(60)
+    time.sleep(60) # Control update frequency
 
 
 if __name__=="__main__":
