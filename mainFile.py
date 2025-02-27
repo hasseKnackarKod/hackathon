@@ -121,6 +121,7 @@ def main():
             print_stats_thread = Thread(target=lambda: print_stats(starting_balance))
             print_stats_thread.start()
 
+            # Add one thread per strategy, with the starting balance as argument and handled by the strategy
             # thread1 = Thread(target=function, args=(starting_balance * starting_allocs[0]))
 
         except KeyboardInterrupt:
