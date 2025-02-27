@@ -31,6 +31,8 @@ def initialize_dataframes():
     
     # Read historical data
     DF = pd.read_csv('historical_data/stockPrices_hourly.csv')
+    DF = pd.read_csv('full_historical_data.csv')
+    
 
     # Convert date column to datetime objects
     DF['gmtTime'] = pd.to_datetime(DF['gmtTime'])
