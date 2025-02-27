@@ -9,7 +9,7 @@ def calculate_moving_average(df: pd.DataFrame, period=14) -> pd.DataFrame:
         period (int): Rolling window period for MA calculation (default: 14).
     
     Returns:
-        pd.DataFrame: Original dataframe with an additional 'MA_{period}' column.
+        pd.DataFrame: Original dataframe with an additional 'MA{period}' column.
     """
     df = df.copy() # Avoid modifying original dataframe
        
@@ -17,7 +17,7 @@ def calculate_moving_average(df: pd.DataFrame, period=14) -> pd.DataFrame:
     price_column = 'openPrice' if 'openPrice' in df.columns else 'price'
 
     # Compute rolling mean using transform to maintain index alignment
-    df[f'MA_{period}'] = df.groupby('symbol')[price_column].transform(lambda x: x.rolling(window=period, min_periods=1).mean())
+    df[f'MA{period}'] = df.groupby('symbol')[price_column].transform(lambda x: x.rolling(window=period, min_periods=1).mean())
 
     return df
 
@@ -30,7 +30,7 @@ def calculate_moving_std(df: pd.DataFrame, period=14) -> pd.DataFrame:
         period (int): Rolling window period for MA calculation (default: 14).
     
     Returns:
-        pd.DataFrame: Original dataframe with an additional 'STD_{period}' column.
+        pd.DataFrame: Original dataframe with an additional 'STD{period}' column.
     """
     df = df.copy() # Avoid modifying original dataframe
        
@@ -38,7 +38,7 @@ def calculate_moving_std(df: pd.DataFrame, period=14) -> pd.DataFrame:
     price_column = 'openPrice' if 'openPrice' in df.columns else 'price'
 
     # Compute rolling mean using transform to maintain index alignment
-    df[f'STD_{period}'] = df.groupby('symbol')[price_column].transform(lambda x: x.rolling(window=period, min_periods=1).std())
+    df[f'STD{period}'] = df.groupby('symbol')[price_column].transform(lambda x: x.rolling(window=period, min_periods=1).std())
 
     return df
 
@@ -71,10 +71,10 @@ def calculate_rsi(df: pd.DataFrame, period=14) -> pd.DataFrame:
 
     # Compute RSI
     df['RS'] = df['avg_gain'] / df['avg_loss']
-    df['RSI'] = 100 - (100 / (1 + df['RS']))
+    df[f'RSI{period}'] = 100 - (100 / (1 + df['RS']))
 
     # Handle cases where loss is zero (avoid division by zero)
-    df['RSI'] = df['RSI'].fillna(100)  # If no losses, RSI = 100
+    df[f'RSI{period}'] = df[f'RSI{period}'].fillna(100)  # If no losses, RSI = 100
 
     # Drop intermediate columns
     df = df.drop(columns=['price_diff', 'gain', 'loss', 'avg_gain', 'avg_loss', 'RS'])

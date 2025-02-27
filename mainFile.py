@@ -15,6 +15,9 @@ df_lock = Lock()
 # For shared data
 import shared
 
+# Import strategies
+from markowitz import markowitz
+
 # Miscellaneous
 import sys
 
@@ -33,7 +36,7 @@ def initialize_dataframes():
     df = df.sort_values(by=['symbol', 'gmtTime'])
 
     # **Maintain rolling window**
-    max_rows = 10000
+    max_rows = np.inf
     if len(df) > max_rows:
         df = df.iloc[-max_rows:]  # Keep only last max_rows entries
 
@@ -125,8 +128,12 @@ def main():
     update_thread = Thread(target=update_df, daemon=True)
     stats_thread = Thread(target=print_stats, args=(starting_balance, ), daemon=True)
 
+    markowitz_thread = Thread(target=markowitz, args=(starting_balance * starting_allocs[0], ), daemon=True)
+
     update_thread.start()
     stats_thread.start()
+
+    markowitz_thread.start()
 
     try: 
         # Keep main thread alive
