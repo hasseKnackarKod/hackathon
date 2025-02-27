@@ -17,6 +17,7 @@ import shared
 
 # Import strategies
 from markowitz import markowitz
+from diverundmom import LiveTradingModel
 
 # Miscellaneous
 import sys
@@ -128,7 +129,10 @@ def main():
     update_thread = Thread(target=update_df, daemon=True)
     stats_thread = Thread(target=print_stats, args=(starting_balance, ), daemon=True)
 
+    diverundmom = LiveTradingModel(starting_capital=starting_balance * starting_allocs[1]).run()
+
     markowitz_thread = Thread(target=markowitz, args=(starting_balance * starting_allocs[0], ), daemon=True)
+    diverundmom_thread = Thread(target= lambda: diverundmom.run())
 
     update_thread.start()
     stats_thread.start()
