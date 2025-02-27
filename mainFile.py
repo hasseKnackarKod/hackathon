@@ -132,8 +132,8 @@ def main():
     stats_thread = Thread(target=print_stats, args=(starting_balance, ), daemon=True)
 
     # *Start Live Trading Model in a Thread*
-    # diverundmom = LiveTradingModel(starting_balance * starting_allocs[1])  # Allocate 50% of funds
-    # diverundmom_thread = Thread(target=diverundmom.run, daemon=True)  # Daemon threa
+    diverundmom = LiveTradingModel(starting_balance * starting_allocs[1])  # Allocate 50% of funds
+    diverundmom_thread = Thread(target=diverundmom.run, daemon=True)  # Daemon threa
 
     markowitz_thread = Thread(target=markowitz, args=(starting_balance * starting_allocs[0], ), daemon=True)
 
@@ -141,7 +141,7 @@ def main():
     stats_thread.start()
 
     markowitz_thread.start()
-    # diverundmom_thread.start()
+    diverundmom_thread.start()
 
     try: 
         # Keep main thread alive

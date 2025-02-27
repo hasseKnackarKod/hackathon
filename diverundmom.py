@@ -51,9 +51,9 @@ class LiveTradingModel:
 
         for symbol in self.daily_data['symbol'].unique():
             try:
-                prev_price = latest_daily_data[f"{symbol}_close"]
-                prev_MA63 = latest_daily_data[f"{symbol}_MA63"]
-                prev_MA252 = latest_daily_data[f"{symbol}_MA252"]
+                prev_price = latest_daily_data[f"{symbol}_close"] ## DENNA BEHÖVER BYTAS NAMN PÅ 
+                prev_MA63 = latest_daily_data[f"{symbol}_MA63"] ## DENNA BEHÖVER BYTAS NAMN PÅ
+                prev_MA252 = latest_daily_data[f"{symbol}_MA252"] # SKA nog också bytas namn på
 
                 if prev_MA63 > prev_MA252:
                     stock_counter += 1
@@ -68,7 +68,7 @@ class LiveTradingModel:
         if self.live_data is None or self.daily_data is None:
             return
 
-        current_time = self.live_data['timestamp'].iloc[-1]
+        current_time = self.live_data['gmtTime'].iloc[-1]
         market_condition = self.calculate_market_regime()
 
         buy_candidates = []
@@ -89,9 +89,9 @@ class LiveTradingModel:
 
                 # Daily indicators
                 prev_daily_data = self.daily_data[self.daily_data['symbol'] == symbol].iloc[-1]
-                prev_price = prev_daily_data['AS TILL'] 
+                prev_price = prev_daily_data['AS TILL'] ### ÄNDRAS EFTER RSI PERIOD ==========================================
                 prev_MA63 = prev_daily_data['MA63']
-                prev_MA252 = prev_daily_data['MA252']
+                prev_MA252 = prev_daily_data['MA252'] 
                 prev_STD63 = prev_daily_data['STD63'] ## ÄNDRA EFTER RSI PERIOD ==========================================
 
                 # Check if stock is in a cool-down period
@@ -145,27 +145,27 @@ class LiveTradingModel:
             daily_spend_limit = 0.5 * self.cash_capital  # 50% of available cash per day
             total_allocated = 0
 
-        for symbol in buy_candidates:   ## CHANGE AND ADJUST AS WE SEE FIT. Good idea to not be fully invested all time?
-            risk_weight = stock_volatilities[symbol] / total_risk_weight
-            bet_size = daily_spend_limit * risk_weight  # Allocate based on volatility
-            if bet_size > self.cash_capital - total_allocated:
-                bet_size = self.cash_capital - total_allocated  # Ensure we don't overspend
+            for symbol in buy_candidates:   ## CHANGE AND ADJUST AS WE SEE FIT. Good idea to not be fully invested all time?
+                risk_weight = stock_volatilities[symbol] / total_risk_weight
+                bet_size = daily_spend_limit * risk_weight  # Allocate based on volatility
+                if bet_size > self.cash_capital - total_allocated:
+                    bet_size = self.cash_capital - total_allocated  # Ensure we don't overspend
 
-            if bet_size < 0.01 * self.cash_capital:  # Ignore too-small bets
-                continue
+                if bet_size < 0.01 * self.cash_capital:  # Ignore too-small bets
+                    continue
 
-            latest_price = self.live_data[self.live_data['symbol'] == symbol].iloc[-1]['close']
-            quantity = int(bet_size / latest_price)
+                latest_price = self.live_data[self.live_data['symbol'] == symbol].iloc[-1]['closePrice']
+                quantity = int(bet_size / latest_price)
 
-            if quantity > 0:
-                lh.buy(ticker=symbol, amount=quantity)
+                if quantity > 0:
+                    lh.buy(ticker=symbol, amount=quantity)
 
-                self.portfolio[symbol] = {'quantity': quantity, 'buy_price': latest_price}
-                total_allocated += bet_size
-                self.last_trade_time[symbol] = current_time
-                print(f"Bought {quantity} shares of {symbol} at {latest_price:.2f}")
-            
-        self.cash_capital -= total_allocated  # Deduct total allocated funds
+                    self.portfolio[symbol] = {'quantity': quantity, 'buy_price': latest_price}
+                    total_allocated += bet_size
+                    self.last_trade_time[symbol] = current_time
+                    print(f"Bought {quantity} shares of {symbol} at {latest_price:.2f}")
+        
+            self.cash_capital -= total_allocated  # Deduct total allocated funds
 
     def run(self):
         """Runs the live trading loop."""
