@@ -12,7 +12,7 @@
 import hackathon_linc as lh
 import pandas as pd
 
-lh.init('92438482-5598-4e17-8b34-abe17aa8f598')
+lh.init('87bb5e63-7539-427f-b65e-66f1e6b6f016')
 
 # These are the Account functions
 orders = lh.get_all_orders()
@@ -23,7 +23,7 @@ portfolio = lh.get_portfolio()
 
 buy_response = lh.buy('STOCK1', 10) # Default köp på current price. Ganska rimligt att vi vill de?
 print('Buy')
-# print(buy_response)
+print(buy_response)
 
 # sell_response = lh.sell('STOCK1', 20) # Default sälj på current price. Ganska rimligt att vi vill de?
 
@@ -53,12 +53,12 @@ historical_data = lh.get_historical_data(365)
 # print('Historical data')
 # print(pd.DataFrame(historical_data))
 
-
-# sell_response = lh.sell('STOCK1', 10,200) # Default sälj på current price. Ganska rimligt att vi vill de?
-# print('Buy')
-# print(buy_response)
-# print('Sell')
-# print(sell_response)
+buy_response = lh.buy('STOCK1', 10) # Default köp på current price. Ganska rimligt att vi vill de?
+sell_response = lh.sell('STOCK1', 10) # Default sälj på current price. Ganska rimligt att vi vill de?
+print('Buy')
+print(buy_response)
+print('Sell')
+print(sell_response)
 
 cancel_response = lh.cancel(order_id='1234', ticker = 'STOCK1')
 
@@ -69,5 +69,6 @@ price_data = lh.get_current_price('STOCK1')
 print('Tickers')
 
 historical_data = lh.get_historical_data(30, 'STOCK1')
-
+print("Historical data")
+print(historical_data)
 

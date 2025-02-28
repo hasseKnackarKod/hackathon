@@ -19,12 +19,11 @@ import shared
 from markowitz import markowitz
 from diverundmom import LiveTradingModel
 
-# Miscellaneous
-import sys
-
 def initialize_dataframes():   
     # Read historical data
-    df = pd.read_csv('historical_data/stockPrices_hourly.csv')
+    historical_data = lh.get_historical_data(days_back=252, ticker=None)
+    df = pd.DataFrame(data=historical_data)
+    # df = pd.read_csv('historical_data/stockPrices_hourly.csv')
 
     # Add date column and convert date columns to datetime
     df['gmtTime'] = pd.to_datetime(df['gmtTime'])
@@ -34,10 +33,11 @@ def initialize_dataframes():
     df['price'] = (df['askMedian'] + df['bidMedian']) / 2
 
     # Sort values
-    df = df.sort_values(by=['symbol', 'gmtTime'])
+    df = df.sort_values(by='gmtTime')
 
     # **Maintain rolling window**
-    max_rows = np.inf
+    max_rows = 8*252
+    max_rows *= len(df['symbol'].unique())
     if len(df) > max_rows:
         df = df.iloc[-max_rows:]  # Keep only last max_rows entries
 
@@ -50,7 +50,13 @@ def initialize_dataframes():
     ).reset_index()
 
     # Sort values
-    df_daily = df_daily.sort_values(by=['symbol', 'date'])
+    df_daily = df_daily.sort_values(by='date')
+
+    # **Maintain rolling window**
+    max_rows = 252
+    max_rows *= len(df_daily['symbol'].unique())
+    if len(df_daily) > max_rows:
+        df_daily = df_daily.iloc[-max_rows:]  # Keep only last max_rows entries
 
     # Store in shared_data
     shared.shared_data['df'] = df
@@ -84,13 +90,14 @@ def append_new_data(df: pd.DataFrame, df_daily: pd.DataFrame, days_back=5, ticke
     # **Append new data**
     df = pd.concat([df, df_new_data], ignore_index=True).reset_index(drop=True)
 
+    # Sort values
+    df = df.sort_values(by='gmtTime')
+
     # **Maintain rolling window**
-    max_rows = 10000
+    max_rows = 8*252
+    max_rows *= len(df['symbol'].unique())
     if len(df) > max_rows:
         df = df.iloc[-max_rows:]  # Keep only last max_rows entries
-
-    # Sort values
-    df = df.sort_values(by=['symbol', 'gmtTime'])
 
     # **Update df_daily using only new and full days**
     last_daily_date = df_daily['date'].max() # Last date of df_daily
@@ -112,31 +119,39 @@ def append_new_data(df: pd.DataFrame, df_daily: pd.DataFrame, days_back=5, ticke
         df_daily = pd.concat([df_daily, df_daily_new]).reset_index(drop=True)
 
         # Sort values
-        df_daily = df_daily.sort_values(by=['symbol', 'date'])
+        df_daily = df_daily.sort_values(by='date')
+
+        # **Maintain rolling window**
+        max_rows = 252
+        max_rows *= len(df_daily['symbol'].unique())
+        if len(df_daily) > max_rows:
+            df_daily = df_daily.iloc[-max_rows:]  # Keep only last max_rows entries
  
     return [df, df_daily]
 
 
 def main():
-    lh.init('92438482-5598-4e17-8b34-abe17aa8f598')
+    lh.init('87bb5e63-7539-427f-b65e-66f1e6b6f016')
 
     # Strategy allocations
-    starting_allocs = [0.25, 0.5, 0.2, 0.05]
+    starting_allocs = [0.15, 0.2, 0.6, 0.05] # Index, markowitz, diverundmom, liquid
     starting_balance = lh.get_balance()
 
     # Initialize data
     initialize_dataframes()
 
-    # Start background threads
+    # Background threads
     update_thread = Thread(target=update_df, daemon=True)
     stats_thread = Thread(target=print_stats, args=(starting_balance, ), daemon=True)
 
-    # *Start Live Trading Model in a Thread*
-    diverundmom = LiveTradingModel(starting_balance * starting_allocs[1])  # Allocate 50% of funds
+    # Markowitz strategy
+    markowitz_thread = Thread(target=markowitz, args=(starting_balance * starting_allocs[1], ), daemon=True)
+
+    # Diverence and momentum strategy
+    diverundmom = LiveTradingModel(starting_balance * starting_allocs[2])  # Allocate 50% of funds
     diverundmom_thread = Thread(target=diverundmom.run, daemon=True)  # Daemon threa
 
-    markowitz_thread = Thread(target=markowitz, args=(starting_balance * starting_allocs[0], ), daemon=True)
-
+    # Start threads
     update_thread.start()
     stats_thread.start()
 
@@ -144,6 +159,19 @@ def main():
     diverundmom_thread.start()
 
     try: 
+        # Buy index for every month for some months
+        nbr_index_buying_months = 5
+        for i in range(nbr_index_buying_months):
+            latest_prices = shared.shared_data['df_daily'].sort_values(by='date').groupby('symbol').last()['closePrice']
+            amount = int( (starting_balance * starting_allocs[0] / latest_prices['INDEX1'] ) / nbr_index_buying_months) 
+            buy_response = lh.buy(ticker='INDEX1', amount=amount)
+
+            if buy_response['order_status'] == 'completed':
+                print(f"Bought index for ${amount * buy_response['price']:,.2f}!")
+            else:
+                print(f"Failed to buy index. Order status: {buy_response['order_status']}")
+
+            time.sleep(8*21) # Wait one month
         # Keep main thread alive
         while True:
             time.sleep(10)

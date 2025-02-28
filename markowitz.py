@@ -27,7 +27,7 @@ def markowitz(starting_capital: float):
     df_daily = shared.shared_data['df_daily'].copy()
     symbols = list(df_daily['symbol'].unique())
     current_position = {symbol: 0 for symbol in symbols} # Symbol : amount
-    current_capital = starting_capital
+    current_cash = starting_capital
     current_portfolio_value = 0
     starting_date = df_daily['date'].unique().max()
 
@@ -40,14 +40,17 @@ def markowitz(starting_capital: float):
         for symbol, amount in current_position.items():
             total_sell = 0
             latest_date = df_daily['date'].unique().max()
-            if amount > 0:
-                lh.sell(ticker=symbol, amount=amount)
-                total_sell += amount * latest_prices[symbol]
+
+            if amount > 0: # If we sold more than none
+                sell_response = lh.sell(ticker=symbol, amount=amount)
+
+                if sell_response['order_status'] == 'completed': # If successful trade
+                    total_sell += amount * sell_response['price']
 
         print(f"Markowitz sold for a value off {total_sell:,.2f} on {latest_date}.")
-        current_capital += total_sell
+        current_cash += total_sell
         current_portfolio_value -= total_sell
-
+        
         # **Maintain rolling window**
         max_days = 252
         if len(df_daily['date'].unique()) > max_days:
@@ -91,24 +94,27 @@ def markowitz(starting_capital: float):
         optimal_weights = result.x
 
         # Caclulate price budget of stocks (rounded down)
-        stocks_price_budget = current_capital * optimal_weights 
+        stocks_price_budget = current_cash * optimal_weights 
 
         for symbol, price_budget in zip(list(df_returns.columns), stocks_price_budget):
             total_buy = 0
             amount = int(price_budget / latest_prices[symbol])
-            if amount > 0:
-                current_position[symbol] = amount
-                lh.buy(ticker=symbol, amount=amount)
-                total_buy += amount * latest_prices[symbol]
+
+            if amount > 0: # If we can afford more than none
+                buy_response = lh.buy(ticker=symbol, amount=amount)
+
+                if buy_response['order_status'] == 'completed': # If successful trade
+                    current_position[symbol] = amount
+                    total_buy += amount * buy_response['price']
 
         print(f"Markowitz bought for a value off {total_buy:,.2f} on {latest_date}.")
-        current_capital -= total_buy
+        current_cash -= total_buy
         current_portfolio_value += total_buy
 
         # Keep track of portfolio and current balance. 
-        print(f"Current Markowitz liquid capital: ${current_capital:,.2f}")
-        print(f"Current Markowitz portfolio value: ${current_portfolio_value:,.2f}")
-        print(f"Markowitz return since {starting_date} is {(current_capital + current_portfolio_value - starting_capital) / starting_capital:.2f}%") 
+        print(f"Markowitz current liquid capital: ${current_cash:,.2f}")
+        print(f"Markowitz current portfolio value: ${current_portfolio_value:,.2f}")
+        print(f"Markowitz return since {starting_date} is {(current_cash + current_portfolio_value - starting_capital) / starting_capital:.2f}%") 
 
         time.sleep(30*8) # Jajemän gubbs, såhär väntar jag på att 30 dagar passerat. Peak performance!
 
