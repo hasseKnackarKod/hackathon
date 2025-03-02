@@ -1,157 +1,140 @@
 # LINC API
 import hackathon_linc as lh
-# Might not be needed:
-# lh.init('92438482-5598-4e17-8b34-abe17aa8f598') # Authenticate and connect to API
-
-# For data handling
 import pandas as pd
 import numpy as np
-from datetime import datetime, time
-
-# For plotting
-import hvplot.pandas
-import holoviews as hv
-
-# For shared data
-import shared
-
-# Miscellaneous
 import time
+import shared
 from scipy.optimize import minimize
-from functions.metrics import calculate_rsi, calculate_moving_average, calculate_moving_std
-
+from functions.metrics import calculate_moving_average
+from logger import setup_logger
+logger = setup_logger('markowitz', 'logs/markowitz.log')
 
 def markowitz(starting_capital: float):
+    logger.info(f"Starting Markowitz strategy with ${starting_capital:,.2f}...")
 
-    # Initialize variables
-    df_daily = shared.shared_data['df_daily'].copy()
+    data_empty = True
+    while data_empty:
+        df_daily = pd.DataFrame(shared.shared_data.get('df_daily', pd.DataFrame()).copy())
+        if df_daily.empty:
+            logger.error("Initial df_daily is empty! Waiting for data...")
+            data_empty = True
+        else:
+            data_empty = False
+    
+    # Variables
     symbols = list(df_daily['symbol'].unique())
     n_assets = len(symbols)
-    current_position = {symbol: 0 for symbol in symbols} # Symbol : amount
+    current_position = {symbol: 0 for symbol in symbols}
     current_cash = starting_capital
     current_portfolio_value = 0
-    starting_date = df_daily['date'].unique().max()
-    HAS_POSITION = False
+    starting_date = df_daily['date'].unique().max() if not df_daily.empty else None
+    has_position = False
 
     # Optimization parameters
-    w0 = np.ones(n_assets) / n_assets # Initial guess: Equal weights
-    constraints = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1}) # Constraints: Sum of weights = 1
-    bounds = [(0, 1)] * n_assets # Bounds: Ensure weights are non-negative (no short selling)
-
-    # Choose parameters
-    # rolling_window = 252  # Rolling window size (1 year)
-    rebalance_days = 21   # Rebalance every 21 trading days (monthly)
-    risk_aversion = 1.5  # Risk aversion parameter
-    market_breadth_threshold = 0.5 # Increase for harsher threshold
+    w0 = np.ones(n_assets) / n_assets
+    constraints = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1}) # Weights sum to 1
+    bounds = [(0, 1)] * n_assets # Weights between 0 and 1 (no short selling)
+    rebalance_days = 21
+    risk_aversion = 1.5
+    market_breadth_threshold = 0.5
     ma_short = 63
     ma_long = 252
 
-    print(f"Markowitz got starting capital: ${starting_capital:,.2f}")
-    
     while True:
-        # Get latest prices
-        latest_prices = df_daily.sort_values(by='date').groupby('symbol').last()['closePrice']
-        trading_dates = df_daily['date'].unique()
+        if data_empty:
+            logger.error("df_daily is empty! Waiting for data...")
+            time.sleep(8) # Wait a day
+            continue
+        try:
+            latest_prices = df_daily.sort_values(by='date').groupby('symbol').last()['closePrice']
+            trading_dates = df_daily['date'].unique()
 
-        # **Sell all current positions**
-        total_sell = 0
-        for symbol, amount in current_position.items():
-            latest_date = df_daily['date'].unique().max()
+            # **Sell all current positions**
+            total_sell = 0
+            for symbol, amount in current_position.items():
+                if amount > 0:
+                    try:
+                        sell_response = lh.sell(ticker=symbol, amount=amount)
+                        if sell_response.get('order_status') == 'completed':
+                            total_sell += amount * sell_response['price']
+                        else:
+                            logger.warning(f"Sell order for {symbol} failed. Order status: {sell_response.get('order_status', 'unknown')}")
+                    except Exception as e:
+                        logger.error(f"Error selling {symbol}: {e}")
 
-            if amount > 0: # If we sold more than none
-                sell_response = lh.sell(ticker=symbol, amount=amount)
+            has_position = False
+            current_cash += total_sell
+            current_portfolio_value -= total_sell
+            logger.info(f"Sold stocks worth ${total_sell:,.2f}")
 
-                if 'order_status' in sell_response and sell_response['order_status'] == 'completed': # If successful trade
-                    total_sell += amount * sell_response['price']
-        
-        HAS_POSITION = False
+            # Calculate moving averages
+            df_daily = calculate_moving_average(df_daily, ma_short)
+            df_daily = calculate_moving_average(df_daily, ma_long)
+            latest_ma = df_daily.sort_values(by='date').groupby('symbol').last()[[f'MA{ma_short}', f'MA{ma_long}']]
 
-        print(f"Markowitz sold for a value off {total_sell:,.2f} on {latest_date}.")
-        current_cash += total_sell
-        current_portfolio_value -= total_sell
-    
-        # Calculate moving average
-        df_daily = calculate_moving_average(df_daily, ma_short)
-        df_daily = calculate_moving_average(df_daily, ma_long)
-        latest_ma = df_daily.sort_values(by='date').groupby('symbol').last()[[f'MA{ma_short}', f'MA{ma_long}']]
+            # Calculate market breadth
+            market_breadth = (latest_ma[f'MA{ma_short}'] - latest_ma[f'MA{ma_long}'] > 0).sum() / n_assets
+            logger.info(f"Current market breadth: {market_breadth}")
 
-        # Calculate market breadth
-        market_breadth = (latest_ma[f'MA{ma_short}'] - latest_ma[f'MA{ma_long}'] > 0).sum() / n_assets
+            if market_breadth > market_breadth_threshold:
+                df_daily['log_return'] = df_daily.groupby('symbol', group_keys=False)['openPrice'].transform(lambda x: np.log(x / x.shift(1)))
+                df_daily.dropna(inplace=True)
+                df_returns = df_daily.pivot(index='date', columns='symbol', values='log_return')
 
-        # Only buy if market_breadth > market_breadth_threshold
-        if market_breadth > market_breadth_threshold:
+                if df_returns.empty:
+                    logger.warning("No valid return data. Skipping this cycle.")
+                    continue  
 
-            # Calculate log returns
-            df_daily['log_return'] = df_daily.groupby('symbol', group_keys=False)['openPrice'].transform(lambda x: np.log(x / x.shift(1)))
-            df_daily.dropna(inplace=True)
+                current_prices = df_daily[df_daily['date'] == trading_dates[-1]].set_index('symbol')['openPrice']
+                past_prices = df_daily[df_daily['date'] == trading_dates[-ma_short]].set_index('symbol')['openPrice']
 
-            # Pivot table to get returns in matrix form (rows = dates, cols = assets)
-            df_returns = df_daily.pivot(index='date', columns='symbol', values='log_return')
+                valid_assets = current_prices.index.intersection(past_prices.index)
+                mu = (current_prices.loc[valid_assets] / past_prices.loc[valid_assets] - 1).values
+                Sigma = df_returns.cov().values
 
-            if df_returns.empty:
-                continue  # Skip if no valid data
+                def objective(w, mu, Sigma, risk_aversion):
+                    return - (np.dot(w, mu) - risk_aversion * np.dot(w.T, np.dot(Sigma, w)))
 
-            # Select most recent prices and prices ma_short days ago
-            current_prices = df_daily[df_daily['date'] == trading_dates[-1]].set_index('symbol')['openPrice']
-            past_prices = df_daily[df_daily['date'] == trading_dates[-ma_short]].set_index('symbol')['openPrice']
+                result = minimize(objective, w0, args=(mu, Sigma, risk_aversion), method='SLSQP', bounds=bounds, constraints=constraints)
+                optimal_weights = result.x
 
-            # Ensure we have matching assets
-            valid_assets = current_prices.index.intersection(past_prices.index)
+                # Buying stocks
+                stocks_price_budget = current_cash * optimal_weights
+                total_buy = 0
+                for symbol, price_budget in zip(list(df_returns.columns), stocks_price_budget):
+                    amount = int(price_budget / latest_prices[symbol])
 
-            # Compute percentage change (mu) from ma_short days ago until now
-            mu = (current_prices.loc[valid_assets] / past_prices.loc[valid_assets] - 1).values
+                    if amount > 0:
+                        try:
+                            buy_response = lh.buy(ticker=symbol, amount=amount)
+                            if buy_response.get('order_status') == 'completed':
+                                current_position[symbol] = amount
+                                total_buy += amount * buy_response['price']
+                                has_position = True
+                            else:
+                                logger.warning(f"Buy order for {symbol} failed. Order status: {buy_response.get('order_status', 'unknown')}")
+                        except Exception as e:
+                            logger.error(f"Error buying {symbol}: {e}")
 
-            # Compute covariance matrix
-            Sigma = df_returns.cov().values  # Covariance matrix
+                current_cash -= total_buy
+                current_portfolio_value += total_buy
+                logger.info(f"Bought stocks worth ${total_buy:,.2f}")
 
-            # Define objective function (negative of return-risk tradeoff)
-            def objective(w, mu, Sigma, risk_aversion):
-                return - (np.dot(w, mu) - risk_aversion * np.dot(w.T, np.dot(Sigma, w)))
+            logger.info('==================== MARKOVITZ CURRENT STATS ====================')
+            logger.info(f"Liquid capital: ${current_cash:,.2f}")
+            logger.info(f"Portfolio value: ${current_portfolio_value:,.2f}")
+            logger.info(f"Return since {starting_date}: {(current_cash + current_portfolio_value - starting_capital) / starting_capital:.2%}")
 
-            # Solve the optimization
-            result = minimize(objective, w0, args=(mu, Sigma, risk_aversion), 
-                            method='SLSQP', bounds=bounds, constraints=constraints)
+            # Wait for rebalance or one day if no current position
+            if has_position:
+                time.sleep(rebalance_days * 8)
+            else:
+                time.sleep(8)
 
-            # Extract optimal weights
-            optimal_weights = result.x
+            # Update df_daily
+            df_daily = pd.DataFrame(shared.shared_data.get('df_daily', pd.DataFrame()).copy())
+            data_empty = df_daily.empty
 
-            # Caclulate price budget of stocks
-            stocks_price_budget = current_cash * optimal_weights 
-            total_buy = 0
-            for symbol, price_budget in zip(list(df_returns.columns), stocks_price_budget):
-                amount = int(price_budget / latest_prices[symbol])
-
-                if amount > 0: # If we can afford more than none
-                    buy_response = lh.buy(ticker=symbol, amount=amount)
-
-                    if 'order_status' in buy_response and buy_response['order_status'] == 'completed': # If successful trade
-                        current_position[symbol] = amount
-                        total_buy += amount * buy_response['price']
-                        HAS_POSITION = True
-
-            print(f"Markowitz bought for a value off {total_buy:,.2f} on {latest_date}.")
-            current_cash -= total_buy
-            current_portfolio_value += total_buy
-
-            ### END OF BUY REGIME
-
-        # Keep track of portfolio and current balance. 
-        print('====================MARKOVITZ CURRENT STATS ====================')
-        print(f"Markowitz current liquid capital: ${current_cash:,.2f}")
-        print(f"Markowitz current portfolio value: ${current_portfolio_value:,.2f}")
-        print(f"Markowitz return since {starting_date} is {(current_cash + current_portfolio_value - starting_capital) / starting_capital:.2f}%") 
-
-        # Wait rebalance_days if currently has a position
-        if HAS_POSITION:
-            time.sleep(rebalance_days * 8)
-        else:
-            time.sleep(8) # Wait one days
-
-        # Update df, df_daily
-        df_daily = shared.shared_data['df_daily'].copy()
-
-        ### END OF WHILE LOOP
-    
-
-        
-            
+        except Exception as e:
+            logger.error(f"Unexpected error in Markowitz strategy: {e}")
+            time.sleep(8) # Wait a day
