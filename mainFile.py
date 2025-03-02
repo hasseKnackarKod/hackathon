@@ -14,10 +14,13 @@ from multiprocessing import freeze_support
 
 # For shared data
 import shared
+from functions.metrics import calculate_rsi
 
 # Import strategies
 from markowitz import markowitz
 from diverundmom import LiveTradingModel
+
+
 
 def initialize_dataframes():   
     # Read historical data
@@ -35,12 +38,6 @@ def initialize_dataframes():
     # Sort values
     df = df.sort_values(by='gmtTime')
 
-    # **Maintain rolling window**
-    max_rows = 8*252
-    max_rows *= len(df['symbol'].unique())
-    if len(df) > max_rows:
-        df = df.iloc[-max_rows:]  # Keep only last max_rows entries
-
     # Aggregate daily open and close prices (assumes historical data contains full days)
     df_daily = df.groupby(['symbol', 'date']).agg(
         openPrice=('price', 'first'),  # First price of the day
@@ -51,12 +48,6 @@ def initialize_dataframes():
 
     # Sort values
     df_daily = df_daily.sort_values(by='date')
-
-    # **Maintain rolling window**
-    max_rows = 252
-    max_rows *= len(df_daily['symbol'].unique())
-    if len(df_daily) > max_rows:
-        df_daily = df_daily.iloc[-max_rows:]  # Keep only last max_rows entries
 
     # Store in shared_data
     shared.shared_data['df'] = df
@@ -93,12 +84,6 @@ def append_new_data(df: pd.DataFrame, df_daily: pd.DataFrame, days_back=5, ticke
     # Sort values
     df = df.sort_values(by='gmtTime')
 
-    # **Maintain rolling window**
-    max_rows = 8*252
-    max_rows *= len(df['symbol'].unique())
-    if len(df) > max_rows:
-        df = df.iloc[-max_rows:]  # Keep only last max_rows entries
-
     # **Update df_daily using only new and full days**
     last_daily_date = df_daily['date'].max() # Last date of df_daily
     last_date = df['date'].max() # Last date of df
@@ -120,12 +105,6 @@ def append_new_data(df: pd.DataFrame, df_daily: pd.DataFrame, days_back=5, ticke
 
         # Sort values
         df_daily = df_daily.sort_values(by='date')
-
-        # **Maintain rolling window**
-        max_rows = 252
-        max_rows *= len(df_daily['symbol'].unique())
-        if len(df_daily) > max_rows:
-            df_daily = df_daily.iloc[-max_rows:]  # Keep only last max_rows entries
  
     return [df, df_daily]
 
@@ -134,7 +113,7 @@ def main():
     lh.init('87bb5e63-7539-427f-b65e-66f1e6b6f016')
 
     # Strategy allocations
-    starting_allocs = [0.15, 0.2, 0.6, 0.05] # Index, markowitz, diverundmom, liquid
+    starting_allocs = [0.15, 0.80, 0.50, 0.05] # Index, markowitz, diverundmom, liquid
     starting_balance = lh.get_balance()
 
     # Initialize data
@@ -142,39 +121,43 @@ def main():
 
     # Background threads
     update_thread = Thread(target=update_df, daemon=True)
-    stats_thread = Thread(target=print_stats, args=(starting_balance, ), daemon=True)
+    # stats_thread = Thread(target=print_stats, args=(starting_balance, ), daemon=True)
 
     # Markowitz strategy
     markowitz_thread = Thread(target=markowitz, args=(starting_balance * starting_allocs[1], ), daemon=True)
 
     # Diverence and momentum strategy
-    diverundmom = LiveTradingModel(starting_balance * starting_allocs[2])  # Allocate 50% of funds
-    diverundmom_thread = Thread(target=diverundmom.run, daemon=True)  # Daemon threa
+    # diverundmom = LiveTradingModel(starting_balance * starting_allocs[2])  # Allocate 50% of funds
+    #diverundmom_thread = Thread(target=diverundmom.run, daemon=True)  # Daemon threa
 
     # Start threads
     update_thread.start()
-    stats_thread.start()
+    # stats_thread.start()
 
     markowitz_thread.start()
-    diverundmom_thread.start()
+    # diverundmom_thread.start()
 
-    try: 
-        # Buy index for every month for some months
-        nbr_index_buying_months = 5
-        for i in range(nbr_index_buying_months):
-            latest_prices = shared.shared_data['df_daily'].sort_values(by='date').groupby('symbol').last()['closePrice']
-            amount = int( (starting_balance * starting_allocs[0] / latest_prices['INDEX1'] ) / nbr_index_buying_months) 
-            buy_response = lh.buy(ticker='INDEX1', amount=amount)
-
-            if buy_response['order_status'] == 'completed':
-                print(f"Bought index for ${amount * buy_response['price']:,.2f}!")
-            else:
-                print(f"Failed to buy index. Order status: {buy_response['order_status']}")
-
-            time.sleep(8*21) # Wait one month
+    try:         
         # Keep main thread alive
         while True:
-            time.sleep(10)
+            nbr_index_buys = 2
+            index_allocation = starting_balance * starting_allocs[0]
+            df_daily = shared.shared_data['df_daily'].copy()
+            df_rsi = calculate_rsi(df_daily, 21)
+            index_rsi = df_rsi[(df_rsi['symbol'] == 'INDEX1') & (df_rsi['date'] == df_rsi['date'].max())]
+
+            # If index 21-day RSI is less than 25
+            if not index_rsi.empty and index_rsi.iloc[0]['RSI21'] < 25:
+                latest_prices = shared.shared_data['df_daily'].sort_values(by='date').groupby('symbol').last()['closePrice']
+                amount = int( (index_allocation / latest_prices['INDEX1'] ) / nbr_index_buys) 
+                buy_response = lh.buy(ticker='INDEX1', amount=amount)
+
+                if buy_response['order_status'] == 'completed':
+                    print(f"Bought index for ${amount * buy_response['price']:,.2f}!")
+                else:
+                    print(f"Failed to buy index. Order status: {buy_response['order_status']}")
+
+            time.sleep(1)
 
     except KeyboardInterrupt:
         print("\nShutdown signal received. Selling all stocks and turning off...")
@@ -183,7 +166,7 @@ def main():
 
             # Loop through portfolio and sell evertyhing
         for symbol, amount in current_portfolio.items():
-            if amount > 0:
+            if amount > 0 and symbol != 'INDEX1':
                 lh.sell(symbol, amount)
         
         print("Sells completed!")
@@ -195,16 +178,25 @@ def main():
 def update_df():
     """Thread-safe function to update df in the main loop."""    
     while True:
-        with df_lock:  # Ensure thread safety
-            df, df_daily = append_new_data(
-                shared.shared_data['df'], shared.shared_data['df_daily'], days_back=3, ticker=None
-            )
-            shared.shared_data['df'], shared.shared_data['df_daily'] = df, df_daily
+        if df_lock.acquire(timeout=5):  # Wait max 5 sec for lock
+            try:
+                df, df_daily = append_new_data(
+                    shared.shared_data['df'], shared.shared_data['df_daily'], days_back=3, ticker=None
+                )
+                shared.shared_data['df'], shared.shared_data['df_daily'] = df, df_daily
+
+                current_time = df['gmtTime'].max()
+                print(f"------NOW'S DATE AND TIME: {current_time}------")
+            finally:
+                df_lock.release()  # Ensure lock is always released
+        else:
+            print("WARNING: Could not acquire df_lock, skipping update.")
 
         time.sleep(1)  # Control update frequency
 
 
-def print_stats(starting_balance: float):    
+
+def print_stats(starting_balance: float):   
     current_balance = lh.get_balance()
     current_portfolio = lh.get_portfolio()
 
